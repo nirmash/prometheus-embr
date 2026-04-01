@@ -21,7 +21,14 @@ def start_prometheus():
     url = f"https://github.com/prometheus/prometheus/releases/download/v{version}/{tarball}.tar.gz"
 
     print(f"Downloading Prometheus v{version}...", flush=True)
-    subprocess.run(f"curl -sL {url} | tar xz -C /tmp", shell=True, check=True)
+    import urllib.request, tarfile, io
+    with urllib.request.urlopen(url, timeout=120) as resp:
+        print(f"Download started ({resp.status})...", flush=True)
+        data = resp.read()
+        print(f"Downloaded {len(data)} bytes, extracting...", flush=True)
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
+        tar.extractall(path="/tmp")
+    print("Extraction complete", flush=True)
 
     print(f"Starting Prometheus on :{PROM_PORT}...", flush=True)
     subprocess.Popen([
