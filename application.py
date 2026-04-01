@@ -11,18 +11,20 @@ from urllib.error import URLError
 PROM_PORT = 9090
 LISTEN_PORT = int(os.environ.get("PORT", 8080))
 PROM_URL = f"http://127.0.0.1:{PROM_PORT}"
+prom_ready = False
 
 
 def start_prometheus():
+    global prom_ready
     version = os.environ.get("PROM_VERSION", "3.3.0")
     tarball = f"prometheus-{version}.linux-amd64"
     url = f"https://github.com/prometheus/prometheus/releases/download/v{version}/{tarball}.tar.gz"
 
-    print(f"Downloading Prometheus v{version}...")
+    print(f"Downloading Prometheus v{version}...", flush=True)
     subprocess.run(f"curl -sL {url} | tar xz -C /tmp", shell=True, check=True)
 
-    print(f"Starting Prometheus on :{PROM_PORT}...")
-    return subprocess.Popen([
+    print(f"Starting Prometheus on :{PROM_PORT}...", flush=True)
+    subprocess.Popen([
         f"/tmp/{tarball}/prometheus",
         "--config.file=/output/prometheus.yml",
         f"--web.listen-address=0.0.0.0:{PROM_PORT}",
@@ -30,9 +32,25 @@ def start_prometheus():
         "--storage.tsdb.path=/tmp/prometheus-data",
     ])
 
+    for _ in range(60):
+        try:
+            urlopen(f"{PROM_URL}/-/ready")
+            prom_ready = True
+            print("Prometheus ready!", flush=True)
+            return
+        except Exception:
+            time.sleep(1)
+    print("Warning: Prometheus may not be ready", flush=True)
+
 
 class ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        if not prom_ready and self.path in ("/", "/health", "/-/ready"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Starting...")
+            return
         self._proxy("GET")
 
     def do_POST(self):
@@ -45,6 +63,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._proxy("DELETE")
 
     def _proxy(self, method):
+        if not prom_ready:
+            self.send_response(503)
+            self.send_header("Content-Type", "text/plain")
+            self.end_headers()
+            self.wfile.write(b"Prometheus starting...")
+            return
+
         target = f"{PROM_URL}{self.path}"
         body = None
         if method in ("POST", "PUT"):
@@ -76,29 +101,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(f"Prometheus unavailable: {e}".encode())
 
     def log_message(self, format, *args):
-        pass  # suppress request logs
-
-
-def wait_for_prometheus():
-    for _ in range(30):
-        try:
-            urlopen(f"{PROM_URL}/-/ready")
-            return True
-        except Exception:
-            time.sleep(1)
-    return False
+        pass
 
 
 if __name__ == "__main__":
-    proc = start_prometheus()
-    print("Waiting for Prometheus to be ready...")
-    if wait_for_prometheus():
-        print(f"Prometheus ready. Proxy listening on :{LISTEN_PORT}")
-    else:
-        print("Warning: Prometheus may not be ready yet")
+    # Start Prometheus download in background thread
+    threading.Thread(target=start_prometheus, daemon=True).start()
 
+    # Start proxy immediately so health check passes
+    print(f"Proxy listening on :{LISTEN_PORT}", flush=True)
     server = HTTPServer(("0.0.0.0", LISTEN_PORT), ProxyHandler)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        proc.terminate()
+    server.serve_forever()
