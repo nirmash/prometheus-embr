@@ -13,4 +13,5 @@ exec /tmp/prometheus-${PROM_VERSION}.linux-amd64/prometheus \
   --config.file=/output/prometheus.yml \
   --web.listen-address=0.0.0.0:8080 \
   --web.enable-otlp-receiver \
+  --web.enable-lifecycle \
   --storage.tsdb.path=/tmp/prometheus-data
