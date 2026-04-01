@@ -5,6 +5,7 @@ import threading
 import time
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from socketserver import ThreadingMixIn
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 
@@ -115,7 +116,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         try:
             req = Request(target, data=body, headers=headers, method=method)
-            with urlopen(req) as resp:
+            with urlopen(req, timeout=30) as resp:
                 self._send_proxy_response(resp)
         except HTTPError as e:
             # Forward the actual error response from Prometheus
@@ -142,11 +143,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         pass
 
 
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
 if __name__ == "__main__":
     # Start Prometheus download in background thread
     threading.Thread(target=start_prometheus, daemon=True).start()
 
     # Start proxy immediately so health check passes
     print(f"Proxy listening on :{LISTEN_PORT}", flush=True)
-    server = HTTPServer(("0.0.0.0", LISTEN_PORT), ProxyHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", LISTEN_PORT), ProxyHandler)
     server.serve_forever()
