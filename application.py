@@ -55,11 +55,15 @@ def start_prometheus():
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
+    def _no_cache(self):
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+
     def do_GET(self):
         # Always return 200 for health checks so Embr doesn't recycle the instance
         if self.path in ("/health", "/-/ready"):
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
+            self._no_cache()
             self.end_headers()
             msg = b"OK" if prom_ready else b"Starting..."
             self.wfile.write(msg)
@@ -67,6 +71,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not prom_ready and self.path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
+            self._no_cache()
             self.end_headers()
             self.wfile.write(b"Starting...")
             return
@@ -91,6 +96,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if not prom_ready:
             self.send_response(503)
             self.send_header("Content-Type", "text/plain")
+            self._no_cache()
             self.end_headers()
             self.wfile.write(b"Prometheus starting...")
             return
