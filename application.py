@@ -6,7 +6,7 @@ import time
 import os
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.request import urlopen, Request
-from urllib.error import URLError
+from urllib.error import URLError, HTTPError
 
 PROM_PORT = 9090
 LISTEN_PORT = int(os.environ.get("PORT", 8080))
@@ -69,6 +69,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def do_DELETE(self):
         self._proxy("DELETE")
 
+    def do_HEAD(self):
+        self._proxy("HEAD")
+
+    def do_OPTIONS(self):
+        self._proxy("OPTIONS")
+
     def _proxy(self, method):
         if not prom_ready:
             self.send_response(503)
@@ -92,20 +98,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             req = Request(target, data=body, headers=headers, method=method)
             with urlopen(req) as resp:
-                resp_body = resp.read()
-                self.send_response(resp.status)
-                for key, val in resp.getheaders():
-                    if key.lower() not in ("transfer-encoding", "connection",
-                                           "content-encoding", "content-length"):
-                        self.send_header(key, val)
-                self.send_header("Content-Length", str(len(resp_body)))
-                self.end_headers()
-                self.wfile.write(resp_body)
+                self._send_proxy_response(resp)
+        except HTTPError as e:
+            # Forward the actual error response from Prometheus
+            self._send_proxy_response(e)
         except URLError as e:
             self.send_response(502)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
             self.wfile.write(f"Prometheus unavailable: {e}".encode())
+
+    def _send_proxy_response(self, resp):
+        resp_body = resp.read()
+        status = resp.status if hasattr(resp, "status") else resp.code
+        self.send_response(status)
+        for key, val in resp.getheaders():
+            if key.lower() not in ("transfer-encoding", "connection",
+                                   "content-encoding", "content-length"):
+                self.send_header(key, val)
+        self.send_header("Content-Length", str(len(resp_body)))
+        self.end_headers()
+        self.wfile.write(resp_body)
 
     def log_message(self, format, *args):
         pass
