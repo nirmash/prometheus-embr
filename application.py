@@ -22,9 +22,16 @@ def start_prometheus():
 
     print(f"Downloading Prometheus v{version}...", flush=True)
     import urllib.request, tarfile, io
-    with urllib.request.urlopen(url, timeout=120) as resp:
+    # Stream download in chunks to avoid socket timeout on large files
+    with urllib.request.urlopen(url, timeout=30) as resp:
         print(f"Download started ({resp.status})...", flush=True)
-        data = resp.read()
+        buf = io.BytesIO()
+        while True:
+            chunk = resp.read(1024 * 1024)  # 1MB chunks
+            if not chunk:
+                break
+            buf.write(chunk)
+        data = buf.getvalue()
         print(f"Downloaded {len(data)} bytes, extracting...", flush=True)
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
         tar.extractall(path="/tmp")
